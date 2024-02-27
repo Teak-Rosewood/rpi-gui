@@ -38,7 +38,7 @@ const VideoFeed = () => {
         <>
             <h1 className="mb-4 text-4xl font-extrabold leading-none tracking-tight text-gray-900 md:text-5xl lg:text-6xl dark:text-white">
                 {" "}
-                Raspberry Pi GUI
+                Raspberry Pi Face Detection
             </h1>
             <div className="flex flex-row">
                 <div>
@@ -50,7 +50,7 @@ const VideoFeed = () => {
                 <div>
                     <h4 className="text-2xl font-bold dark:text-white">Prediction Image</h4>
                     <img height={480} width={480} ref={pred_videoRef} className="p-2" />
-                    <h4>Tenperature Sensor Value</h4>
+                    <h4>Temperature Sensor Value</h4>
                     <div>{temp_sens}</div>
                 </div>
             </div>
