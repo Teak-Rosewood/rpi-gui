@@ -1,8 +1,9 @@
 import { Socket } from "socket.io";
 import cv, { VideoCapture } from "@u4/opencv4nodejs";
-import * as tf from "@tensorflow/tfjs-node";
-import * as faceDetection from "@tensorflow-models/face-detection";
-import { createCanvas, loadImage } from "canvas";
+import "@tensorflow/tfjs-node";
+import * as faceapi from "face-api.js";
+import { createCanvas, loadImage, Image } from "canvas";
+import jpeg from "jpeg-js";
 
 const maxWidth = 480;
 const maxHeight = 480;
@@ -10,8 +11,8 @@ const maxHeight = 480;
 export class SensorData {
     private socket: Socket;
     private webcam: VideoCapture;
-    private detector: faceDetection.FaceDetector | null = null;
-
+    private model_image: string;
+    private limiter: number;
     constructor(socket: Socket) {
         this.socket = socket;
         while (true) {
@@ -23,15 +24,14 @@ export class SensorData {
                 console.log("Error accessing camera, Trying again in 5 Seconds...");
             }
         }
-        this.initModel();
+        this.model_image = "";
+        this.limiter = 0;
     }
 
     async initModel() {
-        await tf.setBackend("cpu");
-        const model = faceDetection.SupportedModels.MediaPipeFaceDetector;
-        this.detector = await faceDetection.createDetector(model, {
-            runtime: "tfjs",
-        });
+        await faceapi.nets.tinyFaceDetector.loadFromDisk("/home/blank/projects/rpi_gui/backend/weights"),
+        console.log("model loaded");
+        return 0;
     }
 
     releaseCapture() {
@@ -51,9 +51,16 @@ export class SensorData {
 
             if (!frame.empty) {
                 const resizedFrame = frame.resize(maxWidth, maxHeight);
-                const original_image = cv.imencode(".jpeg", resizedFrame, [cv.IMWRITE_JPEG_QUALITY, 20]);
-                const model_image = await this.runModel(original_image);
-                this.socket.emit("newImageFrame", { original: original_image.toString("base64"), prediction: model_image });
+                const lowQualityFrame = resizedFrame.resize(Math.round(resizedFrame.cols * 0.4), Math.round(resizedFrame.rows * 0.4));
+                const original_image = cv.imencode(".jpeg", lowQualityFrame);
+                if (this.limiter === 2) {
+                    const data = new Uint8Array(lowQualityFrame.cvtColor(cv.COLOR_BGR2RGB).getData().buffer);
+                    const imgTensor = faceapi.tf.tensor3d(data, [lowQualityFrame.rows, lowQualityFrame.cols, 3]);
+                    this.runModel(imgTensor, original_image);
+                    this.limiter = 0;
+                }
+                this.limiter++;
+                this.socket.emit("newImageFrame", { original: original_image.toString("base64"), prediction: this.model_image });
             }
             setImmediate(CaptureLoop);
         };
@@ -72,25 +79,25 @@ export class SensorData {
         }, 500);
     }
 
-    async runModel(img: Buffer) {
-        await tf.setBackend("tensorflow");
-        const imageTensor = tf.node.decodeImage(img, 3);
-        await tf.setBackend("cpu");
-        const image = await loadImage(`data:image/jpeg;base64,${img.toString("base64")}`);
+    async runModel(faceapi_img: faceapi.tf.Tensor3D, img: Buffer) {
+
+        const image = new Image();
+        image.src = `data:image/jpeg;base64,${img.toString("base64")}`;
         const canvas = createCanvas(image.width, image.height);
         const ctx = canvas.getContext("2d");
-        ctx.drawImage(image, 0, 0, image.width, image.height);
+        ctx?.drawImage(image, 0, 0, image.width, image.height);
 
-        if (this.detector === null) return "";
-        if (imageTensor.rank === 3) {
-            const faces = await this.detector.estimateFaces(imageTensor as tf.Tensor3D, { flipHorizontal: false });
-            faces.forEach((detection) => {
-                const box = detection.box;
-                ctx.strokeStyle = "rgba(0,255,0,1)";
-                ctx.lineWidth = 2;
-                ctx.strokeRect(box.xMin, box.yMin, box.width, box.height);
-            });
+        const detection = await faceapi.detectSingleFace(faceapi_img, new faceapi.TinyFaceDetectorOptions());
+
+        if (detection && ctx !== null) {
+            const box = detection.box;
+            ctx.strokeStyle = "rgba(0,255,0,1)";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(box.x, box.y, box.width, box.height);
         }
-        return canvas.toDataURL().split(",")[1];
+
+        this.model_image = canvas.toDataURL().split(",")[1];
+
+        return 0;
     }
 }

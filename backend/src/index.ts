@@ -22,9 +22,10 @@ app.get("/", (req, res) => {
 });
 const sensor_data: null | SensorData = null;
 
-io.on("connection", (socket: Socket) => {
+io.on("connection", async (socket: Socket) => {
     console.log("GUI Connected...");
     const sensor_data = new SensorData(socket);
+    await sensor_data.initModel();
     sensor_data.startTransmission();
     socket.on("disconnect", () => {
         sensor_data.releaseCapture();
